@@ -20,19 +20,22 @@ struct Judge {
     name: String,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,PartialEq)]
 struct Competitor {
     id: CompetitorID,
     name: String,
     marked: bool, // marked as winner already?
 }
 
-/// A cluster of competitors
-#[derive(Clone)]
-enum CompetitorCluster {
-    One(Competitor),
-    Tie(Vec<Competitor>)
+/// A cluster of objects
+#[derive(Clone,PartialEq)]
+enum Cluster<T> {
+    One(T),
+    Tie(Vec<T>)
 }
+
+/// A cluster of competitors
+type CompetitorCluster = Cluster<Competitor>;
 
 #[derive(Clone,Debug)]
 struct Sheet {
@@ -42,20 +45,23 @@ struct Sheet {
     ranked: Option<Vec<CompetitorCluster>>,
 }
 
-impl CompetitorCluster {
-    pub fn as_one(&self) -> Option<&Competitor> {
+impl<T> Cluster<T> {
+    pub fn as_one(&self) -> Option<&T> {
         match self {
-            CompetitorCluster::One(c) => Some(c),
-            CompetitorCluster::Tie(..) => None,
+            Cluster::One(c) => Some(c),
+            Cluster::Tie(..) => None,
         }
     }
-}
 
-/// temporary, to rank competitors
-struct RankCompute<'a> {
-    judges: &'a [Judge],
-    notes: &'a Vec<Vec<u32>>,
-    competitors: &'a mut Vec<Competitor>,
+    pub fn map<F, U>(&self, mut f: F) -> Cluster<U> where F: FnMut(&T) -> U {
+        match self {
+            Cluster::One(x) => Cluster::One(f(x)),
+            Cluster::Tie(v) => {
+                let v = v.iter().map(|x| f(x)).collect();
+                Cluster::Tie(v)
+            },
+        }
+    }
 }
 
 impl Sheet {
@@ -148,12 +154,16 @@ impl Sheet {
             assert!(res.len() <= n_c);
             if res.len() == n_c {
                 break
-            } else if placement_lvl as usize == n_c {
+            } else if placement_lvl as usize >= n_j {
                 // tie
                 let mut v = vec!();
-                for &c in comp.iter() { v.push(self[c].clone()) }
-                println!("reached end of placement, declare tie for {:?}", &v);
-                res.push(CompetitorCluster::Tie(v));
+                for &c in comp.iter() { if !self[c].marked { v.push(self[c].clone()) } }
+                if v.len() > 1 {
+                    println!("reached end of placement, declare tie for {:?}", &v);
+                    res.push(Cluster::Tie(v));
+                } else if v.len() == 1 {
+                    res.push(Cluster::One(v.pop().unwrap()));
+                }
                 break;
             }
 
@@ -171,7 +181,7 @@ impl Sheet {
                 assert!(! c.marked);
                 c.marked =  true;
                 println!("winner for this round (by majority): {:?}", c.name);
-                res.push(CompetitorCluster::One(c.clone()))
+                res.push(Cluster::One(c.clone()))
             } else {
                 assert!(potential_winners.len() >= 2);
                 // several candidates
@@ -194,7 +204,7 @@ impl Sheet {
                     println!(
                         "winner for this round (biggest majority of {}): {:?}",
                         biggest_majority, c.name);
-                    res.push(CompetitorCluster::One(c.clone()));
+                    res.push(Cluster::One(c.clone()));
                     continue;
                 } else {
                     // tie breaking 1
@@ -217,7 +227,7 @@ impl Sheet {
                         println!(
                             "winner for this round (with smallest sum {}): {:?}",
                             smallest_sum, c.name);
-                        res.push(CompetitorCluster::One(c.clone()));
+                        res.push(Cluster::One(c.clone()));
                         continue;
                     } else {
                         println!(
@@ -227,6 +237,9 @@ impl Sheet {
 
                         // sort only these competitors, at next level
                         let r = self.rank_for(&competitors_with_smallest_sum, placement_lvl+1);
+                        for &c in competitors_with_smallest_sum.iter() {
+                            self[c].marked = true; // ranked now
+                        }
                         res.extend_from_slice(&r);
                     }
                 }
@@ -293,9 +306,6 @@ impl Sheet {
     }
 }
 
-impl<'a> RankCompute<'a> {
-}
-
 impl std::ops::Index<JudgeID> for Sheet {
     type Output = Judge;
     fn index(&self, idx: JudgeID) -> &Self::Output {
@@ -340,15 +350,15 @@ impl fmt::Display for Sheet {
     }
 }
 
-impl fmt::Display for CompetitorCluster {
+impl<T> fmt::Display for Cluster<T> where T: fmt::Debug {
     fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CompetitorCluster::One(c) => write!(out, "{:?}", c.name),
-            CompetitorCluster::Tie(v) => {
+            Cluster::One(c) => write!(out, "{:?}", c),
+            Cluster::Tie(v) => {
                 write!(out, "{{")?;
                 for (i,c) in v.iter().enumerate() {
                     if i>0 { write!(out, ", ")? }
-                    write!(out, "{:?}", c.name);
+                    write!(out, "{:?}", c);
                 }
                 write!(out, "}}")
             },
@@ -356,13 +366,17 @@ impl fmt::Display for CompetitorCluster {
     }
 }
 
-impl fmt::Debug for CompetitorCluster {
+impl<T> fmt::Debug for Cluster<T> where T: fmt::Debug {
     fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result {
         fmt::Display::fmt(self, out) // delegate to display
     }
 }
 
-
+impl fmt::Debug for Competitor {
+    fn fmt(&self, out: &mut fmt::Formatter) -> fmt::Result {
+        write!(out, "{:?}", self.name)
+    }
+}
 
 fn main() -> Res<()> {
     let file = std::env::args().skip(1).next().expect("please give a file");
