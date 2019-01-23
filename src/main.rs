@@ -263,7 +263,7 @@ impl Sheet {
             v.push((c,n));
         }
 
-        println!("{}-placements: {:?}", placement_lvl, &v);
+        println!("{}-placements: {:?}", placement_lvl, v.iter().map(|(_,n)| *n).collect::<Vec<_>>());
         v
     }
 
@@ -384,6 +384,6 @@ fn main() -> Res<()> {
     println!("parsed sheet {}", &sheet);
 
     let ranked = sheet.rank();
-    println!("ranked: {:?}", &ranked);
+    println!("\n############\nranked: {:?}", &ranked);
     Ok(())
 }
